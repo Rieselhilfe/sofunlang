@@ -74,7 +74,7 @@ operatorParser = do first <- letter <|> specialCharacter
                     return $ Operator (first:rest)
 
 valueParser :: Parser SofunToken
-valueParser = do dash <- option "" $ string "-"
+valueParser = do dash <- option "" $ (string "-" <|> (char '+' >> return ""))
                  before <- many1 digit
                  dot <- option "" $ string "."
                  after <- option "" $ many digit
