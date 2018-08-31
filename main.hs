@@ -25,11 +25,11 @@ data SofunToken = Number Double
                 deriving (Eq)
 
 instance Show SofunToken where
-  show (Number x) = (show x)++";\n"
-  show (Operator x) = "op "++x++";\n"
+  show (Number x) = (show x)++"\n"
+  show (Operator x) = "op "++x++"\n"
   show (Stack x) = "(\n"++(show x)++")\n"
-  show (Boolean x) | x == True = "!"
-                   | otherwise = "?"
+  show (Boolean x) | x == True = "!\n"
+                   | otherwise = "?\n"
 
 data SofunSource = SofunSource [SofunToken]
                  deriving (Eq)
