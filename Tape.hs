@@ -3,6 +3,7 @@ module Tape where
 data Tape a = Tape [a] a [a]
 
 listToTape (x:xs) = (Tape [] x xs)
+listToTape [] = error $ "tried to convert empty list to tape"
 tapeToList (Tape x y z) = (reverse x)++(y:z)
 
 moveRight (Tape ls p (r:rs)) = Tape (p:ls) r rs

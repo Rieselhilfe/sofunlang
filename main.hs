@@ -14,9 +14,9 @@ main = do
          putStrLn (runExpr expr)
 
 runExpr :: String -> String
-runExpr input = case parse mainStackParser "sofun" input of
+runExpr input = case parse sourceParser "sofun" input of
   Left err -> "No match: " ++ show err
-  Right val -> show $ sfEval $ val
+  Right val -> show $ sfRun val Map.empty
 
 -- data structures for parsing
 
@@ -36,12 +36,6 @@ instance Show SofunToken where
 
 data SfStack = SfStack [SofunToken]
                  deriving (Eq)
-
-data SfTail = SfTail SfStack SfStack -- condition and return stack
-getCond (SfTail cond _) = cond
-getBody (SfTail _ body) = body
-
-data SfFun  = SfFun [SofunToken] [SfTail] -- args and tail
 
 instance Show SfStack where
   show (SfStack x) = concatMap show x
@@ -68,6 +62,16 @@ instance Monoid SfStack where
   mempty = SfStack []
   mappend (SfStack xs) (SfStack ys) = SfStack $ xs++ys
 
+data SfTail = SfTail SfStack SfStack -- condition and return stack
+
+getCond (SfTail cond _) = cond
+getBody (SfTail _ body) = body
+
+data SfFun  = SfFun [SofunToken] [SfTail] -- args and tail
+
+data SfSource = Fun (String, SfFun)
+              | MainStack SfStack
+
 -- functions for parsing
 
 spaces :: Parser ()
@@ -81,11 +85,11 @@ builtInParser = do symbol <- oneOf "+-*/<=^v#°"
                    spaces <|> eof
                    return $ BuiltIn symbol  
 
-operatorParser :: Parser SofunToken
-operatorParser = do first <- letter
-                    rest <- many1 (letter <|> digit <|> specialCharacter)
-                    spaces <|> eof
-                    return $ Identifier (first:rest)
+identifierParser :: Parser SofunToken
+identifierParser = do first <- letter
+                      rest <- many (letter <|> digit <|> specialCharacter)
+                      spaces <|> eof
+                      return $ Identifier (first:rest)
 
 valueParser :: Parser SofunToken
 valueParser = do dash <- option "" $ (string "-" <|> (char '+' >> return ""))
@@ -99,12 +103,6 @@ booleanParser :: Parser SofunToken
 booleanParser = do a <- oneOf "!?"
                    spaces <|> eof
                    return $ Boolean $ (\x -> if x=='!' then True else False) a
-
-allSimpleTokenParser :: Parser SfStack
-allSimpleTokenParser = do
-  a <- many (try valueParser <|> try booleanParser <|> try builtInParser <|>
-             try operatorParser <|> try stackParser)
-  return $ SfStack a
   
 stackParser :: Parser SofunToken
 stackParser = do char '('
@@ -115,14 +113,21 @@ stackParser = do char '('
                  spaces <|> eof
                  return $ Stack $ SfStack $ reverse $ a
 
+allSimpleTokenParser :: Parser SfStack
+allSimpleTokenParser = do
+  a <- many (try valueParser <|> try booleanParser <|> try builtInParser <|>
+             try identifierParser <|> try stackParser)
+  return $ SfStack a
+
 mainStackParser :: Parser SfStack
 mainStackParser = do a <- allSimpleTokenParser
                      eof
                      return $ a
 
 headParser :: Parser [SofunToken]
-headParser = do a <- many1 operatorParser
+headParser = do a <- many1 identifierParser
                 char ':'
+                spaces
                 return a
 
 simpleTailParser :: Parser [SfTail]
@@ -130,10 +135,30 @@ simpleTailParser = do a <- allSimpleTokenParser
                       eof
                       return $ [SfTail (SfStack []) a] -- one stack without condition
 
-declParser :: Parser SfFun
-declParser = do (a:as) <- headParser
-                b <- simpleTailParser -- TODO
-                return $ SfFun as b
+branchParser :: Parser SfTail
+branchParser = do a <- allSimpleTokenParser
+                  char ':'
+                  spaces
+                  b <- allSimpleTokenParser
+                  (oneOf "!?" >> spaces) <|> eof
+                  return $ SfTail a b 
+
+complexTailParser :: Parser [SfTail]
+complexTailParser = do a <- many branchParser
+                       return a
+
+declParser :: Parser (String, SfFun)
+declParser = do ((Identifier a):as) <- headParser
+                b <- simpleTailParser <|> complexTailParser
+                return $ (a, SfFun as b)
+
+sourceParser :: Parser [SfSource]
+sourceParser = do a <- many declParser
+                  many space
+                  string "\n"
+                  many space
+                  b <- mainStackParser
+                  return $ (map Fun a)++[MainStack b]
 
 -- data structures for evaluation
 
@@ -162,22 +187,18 @@ applyFun :: String -> [SofunToken] -> Map.Map String SfFun -> ([SofunToken], [So
 applyFun name xs funMap = helper fun
   where fun = if isJust f then fromJust f else error $ "function not found " ++ name
                   where f = Map.lookup name funMap
-        helper fun@(SfFun fArgs _) = (drop (length fArgs+1) xs,
+        helper fun@(SfFun fArgs _) = (drop (length fArgs) xs,
                                       replBody fArgs (findBody fun xs) xs)
         findBody (SfFun _ []) _ = error $ "tried to apply empty function " ++ name
         findBody (SfFun _ (fTail:[])) xs = getBody fTail
         findBody (SfFun fArgs (fTail:ts)) xs
           | isEmpty $ getCond fTail = getBody fTail
-          | (pop $ sfEval $ SfStack $ replBody fArgs (getCond fTail) xs) == Boolean True = getBody fTail
+          | (pop $ sfEval (SfStack $ replBody fArgs (getCond fTail) xs) funMap) == Boolean True = getBody fTail
           | otherwise = findBody (SfFun fArgs ts) xs
         replBody fArgs (SfStack body) args = [fromMaybe x $ lookup x $ zip fArgs args | x <- body]
 
-testMap = Map.singleton "id" $ SfFun [Identifier "a"] [SfTail (SfStack []) (SfStack [Identifier "a",
-                                                                                     Identifier "a",
-                                                                                     BuiltIn '+'])]
-
-sfEval :: SfStack -> SfStack
-sfEval (SfStack x) = SfStack $ tapeToList $ helper (listToTape x) testMap
+sfEval :: SfStack -> Map.Map String SfFun -> SfStack
+sfEval (SfStack x) funMap = trace (show x) $ SfStack $ tapeToList $ helper (listToTape x) funMap
   where helper (Tape xs (BuiltIn x) ys) funMap = helper (Tape xsMinArgs retHead (retTail++ys)) funMap
           where xsMinArgs = fst $ applyBuiltIn x xs
                 retStack  = snd $ applyBuiltIn x xs
@@ -194,3 +215,8 @@ sfEval (SfStack x) = SfStack $ tapeToList $ helper (listToTape x) testMap
                           | otherwise = []
         helper source@(Tape _ _ []) _ = source
         helper source@(Tape _ _ _) funMap = helper (moveRight source) funMap
+
+sfRun :: [SfSource] -> Map.Map String SfFun -> SfStack
+sfRun ((Fun (x,y)):xs) funMap = sfRun xs $ Map.insert x y funMap
+sfRun ((MainStack x):[]) funMap = sfEval x funMap
+sfRun _ _ = error $ "source code isn't in correct format"
