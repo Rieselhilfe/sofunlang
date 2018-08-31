@@ -74,12 +74,12 @@ operatorParser = do first <- letter <|> specialCharacter
                     return $ Operator (first:rest)
 
 valueParser :: Parser SofunToken
-valueParser = do dash <- optionMaybe $ string "-"
+valueParser = do dash <- option "" $ string "-"
                  before <- many1 digit
-                 dot <- optionMaybe $ string "."
-                 after <- optionMaybe $ many digit
+                 dot <- option "" $ string "."
+                 after <- option "" $ many digit
                  spaces <|> eof
-                 return $ Number (read $ (fromMaybe "" dash)++before++((fromMaybe "" dot)++(fromMaybe "" after)))
+                 return $ Number (read $ dash++before++dot++after)
 
 booleanParser :: Parser SofunToken
 booleanParser = do a <- oneOf "!?"
