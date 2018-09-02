@@ -16,4 +16,5 @@ instance Functor Tape where
   fmap f (Tape ls p rs) = Tape (map f ls) (f p) (map f rs)
 
 instance Show a => Show (Tape a) where
-  show = show . tapeToList
+  show (Tape as x bs) =
+    (concatMap show $ reverse as) ++ "[[ " ++ (show x) ++ "]] " ++ (concatMap show bs) 
