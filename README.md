@@ -10,3 +10,5 @@ improvements over the c++ version include:
 * Now with a basic type system (text types to be added soon, maybe there will be a hello-world after all ;) )
 * More and better error messages, less edge cases
 * far more elegant code ;)
+* several tools to make working with the repl easier (a reworked debug mode, command to print out function definitions of loaded files)
+* better naming of built-in functions
