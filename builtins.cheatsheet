@@ -1,0 +1,14 @@
++ : add (Number, Number) -> Number
+- : substract (Number, Number) -> Number
+* : multiply (Number, Number) -> Number
+/ : divide (Number, Number) -> Number
+% : modulo (Number, Number) -> Number
+
+< : less than (Number, Number) -> Boolean
+= : equals (Number, Number) -> Boolean
+(>, <=, ~ are defined in std.fun)
+
+^ : push (Stack, Element) -> Stack
+v : pop (Stack) -> Element
+; : popped (Stack) -> Stack
+° : is empty (Stack) -> Boolean
