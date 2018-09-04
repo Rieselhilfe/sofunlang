@@ -5,30 +5,20 @@ import Data.Maybe
 import qualified Data.Map as Map
 import Tape
 import Debug.Trace
-import Control.DeepSeq
-import Control.Monad
 import Control.Monad.State
 import System.Environment
-import System.IO
 import System.Console.Haskeline
-import System.Exit (exitSuccess)
 
 main :: IO ()
 main = do options <- getArgs
           case options of
             []                 -> runInputT defaultSettings $ replMode False Map.empty
             ("-v":_)           -> runInputT defaultSettings $ replMode True Map.empty
-            ("-f":fileName:_)  -> fileMode fileName False
-            ("-vf":fileName:_) -> fileMode fileName True
-            _                  -> putStrLn "I don't understand your arguments"
-
-fileMode fileName verbose = do
-  withFile fileName ReadMode (\handle -> do
-                                 expr <- hGetContents handle
-                                 expr `deepseq` do putStrLn $ fst $ evalAllLines expr)
-  where evalAllLines expr = foldl (\(x,y) sfLine -> runState (runLine verbose sfLine) y) ("",Map.empty) $
-                       filter (\x -> x/="" && (head x) /= '#') $
-                       lines expr
+            ("-f":fileName:_)  -> runInputTBehavior (useFile fileName) defaultSettings
+                                  $ fileMode False Map.empty 1 >> return ()
+            ("-vf":fileName:_) -> runInputTBehavior (useFile fileName) defaultSettings
+                                  $ fileMode True Map.empty 1 >> return ()
+            _                  -> putStrLn "I don't understand your arguments..."
 
 type FunMap = Map.Map String SfFun
 
@@ -36,30 +26,49 @@ replMode :: Bool -> FunMap -> InputT IO ()
 replMode verbose sfFuns = do
   a <- getInputLine "((λ)): "
   case a of
-    Nothing -> replMode verbose sfFuns
-    Just ":quit" -> return ()
-    Just input   -> do let (b,c) = runState (runLine verbose input) sfFuns
-                       outputStrLn b
-                       replMode verbose c
+    Nothing           -> return ()
+    Just ""           -> replMode verbose sfFuns
+    Just ('#':_)      -> replMode verbose sfFuns
+    Just (':':'q':_)  -> return ()
+    Just (':':'d':_)  -> replMode (not verbose) sfFuns
+    Just (':':'m':_)  -> do let s = Map.lookup (head $ tail $ words $ fromJust a) sfFuns 
+                            case s of
+                              Nothing    -> outputStrLn "I don't know this function..."
+                              Just sfFun -> outputStrLn (showFun (head $ tail $ words $ fromJust a) sfFun)
+                            replMode verbose sfFuns
+    Just (':':'l':_)  -> do (_,newFuns) <- runInputTBehavior
+                                             (useFile $ head $ tail $ words $ fromJust a)
+                                             defaultSettings
+                                             $ fileMode verbose sfFuns 1
+                            outputStrLn("done loading!") --TODO (Documentation)
+                            replMode verbose newFuns
+    Just input    -> do let (out,newFuns) = runState (runLine verbose input 1) sfFuns
+                        outputStrLn out
+                        replMode verbose newFuns
 
-runLine :: Bool -> String -> State FunMap String
-runLine verbose newLine = do
+fileMode :: (MonadException m) => Bool -> FunMap -> Int -> InputT m (String,FunMap)
+fileMode verbose sfFuns counter = do
+  a <- getInputLine ""
+  case a of
+    Nothing      -> return ("",sfFuns) 
+    Just ""      -> fileMode verbose sfFuns (counter+1)
+    Just ('#':_) -> fileMode verbose sfFuns (counter+1)
+    Just input   -> do let (b,c) = runState (runLine verbose input counter) sfFuns
+                       if (length b) > 1
+                         then outputStrLn b >> return (b,sfFuns)
+                         else fileMode verbose c (counter+1)
+  
+runLine :: Bool -> String -> Int -> State FunMap String
+runLine verbose newLine lineNum = do
   code <- runHelper
-  if code == (SfStack [])
+  if code == mempty
     then do return ""
     else return $ show $ code
-  where parseHelper input = case parse sourceParser "input" input of
-          Left err -> error $ "error while parsing: " ++ (show err)
-          Right val -> val
-        runHelper = sfRun verbose (parseHelper newLine)
-
-
--- runCode :: Bool -> [String] -> String
--- runCode verbose sfLines = show $ sfRun verbose (map helper $ zip [1..] sfLines) Map.empty
---   where helper (line, input) = case parse sourceParser ("(Line "++(show line)) input of
---           Left err -> error $ "error while parsing: " ++ (show err)
---           Right val -> val
-
+  where parseHelper input = parse sourceParser ("") input
+        runHelper = case parseHelper newLine of
+          Left err -> trace ("I ran into an error while parsing (line " ++ (show lineNum) ++", "
+                             ++ (drop 9 $ show $ err)) $ return mempty
+          Right val -> sfRun verbose val
 
 -- data structures for parsing
 
@@ -91,11 +100,11 @@ push :: SfToken -> SfStack -> SfStack
 push a (SfStack xs) = SfStack $ a:xs
 
 pop :: SfStack -> SfToken
-pop (SfStack []) = error "tried to pop an empty stack"
+pop (SfStack []) = error "You tried to pop an empty stack..."
 pop (SfStack xs) = head xs
 
 popped :: SfStack -> SfStack
-popped (SfStack []) = error "tried to popped an empty stack"
+popped (SfStack []) = error "You tried to popped an empty stack..."
 popped (SfStack xs) = SfStack $ tail xs
 
 isEmpty :: SfStack -> Bool
@@ -106,12 +115,20 @@ instance Monoid SfStack where
   mempty = SfStack []
   mappend (SfStack xs) (SfStack ys) = SfStack $ xs++ys
 
-data SfTail = SfTail SfStack SfStack deriving (Show) -- condition and return stack
+data SfTail = SfTail SfStack SfStack -- condition and return stack
+
+instance Show SfTail where
+  show (SfTail (SfStack []) bs) = "? " ++ (show bs)
+  show (SfTail as           bs) = "? " ++ (show as) ++  ": " ++ (show bs) 
 
 getCond (SfTail cond _) = cond
 getBody (SfTail _ body) = body
 
-data SfFun  = SfFun [SfToken] [SfTail] deriving (Show) -- args and tail
+data SfFun  = SfFun [SfToken] [SfTail] deriving (Show) -- args and tail  
+
+showFun _ (SfFun [] [])    = ""
+showFun name (SfFun [] xs) = name ++ " : " ++ (drop 2 $ concatMap show xs)
+showFun name (SfFun as xs) = (concatMap show as) ++ name ++ " " ++ (concatMap show xs)
 
 data SfSource = Fun (SfToken, SfFun) -- name and fun
               | MainStack SfStack deriving (Show)
@@ -128,7 +145,7 @@ comment = do char '#'
 specialCharacter :: Parser Char
 specialCharacter = (oneOf "!>@_{[]}´`'\"\\.,~&|ł€ŧ←↓→øþſæđŋħĸł»«¢„“”µ·…") <?> "special character"
 
-reservedCharacter = (oneOf "+-*/<=^v°$§():;?") <?> "reserved Character"
+reservedCharacter = (oneOf "+-*/<=^v°$§:;?") <?> "reserved Character"
 
 builtInParser :: Parser SfToken
 builtInParser = do symbol <- oneOf "+-*/<;=^%v°" <?> "built in"
@@ -189,7 +206,7 @@ headParser = do a <- many1 $ try identifierParser
 simpleTailParser :: Parser [SfTail]
 simpleTailParser = do a <- allSimpleTokenParser
                       eof <|> comment
-                      return $ [SfTail (SfStack []) a] -- one stack without condition
+                      return $ [SfTail mempty a] -- one stack without condition
 
 branchParser :: Parser SfTail
 branchParser = do a <- allSimpleTokenParser
@@ -210,7 +227,7 @@ declParser = do as <- headParser
                 return $ Fun $ ((last as), SfFun (init as) b)
 
 sourceParser :: Parser SfSource
-sourceParser = do a <- declParser <|> mainStackParser
+sourceParser = do a <- try declParser <|> try mainStackParser
                   eof <|> comment
                   return $ a
 
@@ -234,12 +251,12 @@ applyBuiltIn '^' (vx@(Number _):(Stack y):xs)  = (xs,[Stack $ push vx y])
 applyBuiltIn 'v' ((Stack y):xs)                = (xs,[pop y])
 applyBuiltIn ';' ((Stack y):xs)                = (xs,[Stack $ popped y])
 applyBuiltIn '°' ((Stack y):xs)                = (xs,[Boolean $ isEmpty y])
-applyBuiltIn a (xs) = error $ "built-in function applied to wrong arguments " ++ [a]
+applyBuiltIn a (_) = error $ "built-in function applied to wrong arguments " ++ [a]
 
 
 applyFun :: String -> [SfToken] -> FunMap -> ([SfToken], [SfToken])
 applyFun name xs funMap = helper fun
-  where fun = if isJust f then fromJust f else error $ "function not found " ++ name
+  where fun = if isJust f then fromJust f else error $ "I never heard of " ++ name
                   where f = Map.lookup name funMap
         helper fun@(SfFun fArgs _) = (drop (length fArgs) xs,
                                       replBody fArgs (findBody fun xs) xs)
@@ -254,7 +271,7 @@ applyFun name xs funMap = helper fun
           where condReturn = (pop $ sfEval False (SfStack $ replBody fArgs (getCond fTail) xs) funMap)
         replBody fArgs (SfStack body) args | length args >= length fArgs =
                                              [lookAndExchange x $ zip (reverse fArgs) args | x <- body]
-                                           | otherwise = error $ "function applied to too few args "
+                                           | otherwise = error $ "this function needs more arguments: "
                                                          ++ name
           where lookAndExchange (Stack x) table = Stack $ SfStack $ replBody fArgs x args
                 lookAndExchange x table = fromMaybe x $ lookup x table
@@ -295,13 +312,15 @@ sfEval verbose (SfStack x) funMap = SfStack $ tapeToList $ helper (listToTape x)
 
 
 sfRun :: Bool -> SfSource -> State FunMap SfStack
-sfRun verbose (Fun ((Identifier x),y)) = do
+sfRun _ (Fun ((Identifier x),y)) = do
   sfFuns <- get
   put $ Map.insert x y sfFuns
-  return (SfStack [])
+  return mempty
+  
 sfRun verbose (MainStack x) = do
   gets (sfEval verbose x)
-sfRun verbose x = error $ "source code isn't in correct format" ++ (show x)
+
+sfRun _ x = error $ "This isn't propperly formatted sofun code: " ++ (show x)
 
 traceShowIf True  x = traceShow x
 traceShowIf False _ = id
