@@ -8,6 +8,7 @@ import Debug.Trace
 import Control.Monad.State
 import System.Environment
 import System.Console.Haskeline
+import System.IO.Unsafe
 
 main :: IO ()
 main = do options <- getArgs
@@ -161,13 +162,13 @@ comment = do char '#'
              return ()
 
 specialCharacter :: Parser Char
-specialCharacter = (oneOf "!>@_{[]}´`'\"\\.,~&|ł€ŧ←↓→øþſæđŋħĸł»«¢„“”µ·…") <?> "special character"
+specialCharacter = (oneOf "!>@_{[]}´`'\"\\~&|ł€ŧ←↓→øþſæđŋħĸł»«¢„“”µ·…") <?> "special character"
 
 reservedCharacter :: Parser Char
-reservedCharacter = (oneOf "+-*/<=^v°$§:;?") <?> "reserved Character"
+reservedCharacter = (oneOf "+-*/<=^v°$§:;?.,") <?> "reserved Character"
 
 builtInParser :: Parser SfToken
-builtInParser = do symbol <- oneOf "+-*/<;=^%v°" <?> "built in"
+builtInParser = do symbol <- oneOf "+-*/<;=^%v°.," <?> "built in"
                    spaces <|> eof <|> comment
                    return $ BuiltIn symbol
 
@@ -285,7 +286,19 @@ applyBuiltIn '^' (vx@(Number _):(Stack y):xs)  = (xs,[Stack $ push vx y])
 applyBuiltIn 'v' ((Stack y):xs)                = (xs,[pop y])
 applyBuiltIn ';' ((Stack y):xs)                = (xs,[Stack $ popped y])
 applyBuiltIn '°' ((Stack y):xs)                = (xs,[Boolean $ isEmpty y])
+-- IO
+applyBuiltIn '.' ((Stack y):xs)                = (xs,printString "" y)
+  where printString :: String -> SfStack -> [SfToken]
+        printString acc (SfStack []) = unsafePerformIO $ putStrLnEmptyList acc
+        printString acc (SfStack ((Character x):xs)) = printString (x:acc) (SfStack xs)
+        printString _ _ = []
+        putStrLnEmptyList x = do putStrLn x
+                                 return []
+applyBuiltIn ',' (xs)                          = (xs,[readString])
+  where readString :: SfToken
+        readString = Stack $ foldl (flip push) (SfStack []) (map Character $ unsafePerformIO $ getLine)
 applyBuiltIn a (_) = error $ "built-in function applied to wrong arguments " ++ [a]
+  
 
 
 applyFun :: String -> [SfToken] -> FunMap -> ([SfToken], [SfToken])
