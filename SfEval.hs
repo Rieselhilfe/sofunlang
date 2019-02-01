@@ -70,11 +70,9 @@ applyFun name xs funMap = helper fun
                                 ++ " " ++ (show $ condReturn)
           where condReturn = (pop $ sfEval False (SfStack $ replBody fArgs (getCond fTail) xs) funMap)
         replBody fArgs (SfStack body) args | length args >= length fArgs =
-                                             [lookAndExchange x $ zip (reverse fArgs) args | x <- body]
-                                           | otherwise = error $ "this function needs more arguments: "
-                                                         ++ name
-          where lookAndExchange (Stack x) table = Stack $ SfStack $ replBody fArgs x args
-                lookAndExchange x table = fromMaybe x $ lookup x table
+                                             map (lookAndExchange (zip (reverse fArgs) args)) body
+                                           | otherwise =
+                                             error $ "this function needs more arguments: " ++ name
 
 
 sfEval :: Bool -> SfStack -> FunMap -> SfStack

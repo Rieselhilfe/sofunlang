@@ -1,19 +1,22 @@
 module SfParser where
 import Text.Parsec hiding (spaces,State)
 import Text.Parsec.String
+import Data.Maybe
 import qualified Data.Map as Map
+import Debug.Trace
 
 parseSofun input = parse sourceParser ("") input
 
 type FunMap = Map.Map String SfFun
 
 data SfToken = Number Double
-                | Boolean Bool
-                | BuiltIn Char
-                | Identifier String
-                | Stack SfStack
-                | Character Char
-                deriving (Eq)
+             | Boolean Bool
+             | BuiltIn Char
+             | Identifier String
+             | Stack SfStack
+             | Character Char
+             | Argument Int
+             deriving (Eq)
 
 isString :: SfStack -> Bool
 isString (SfStack []) = True
@@ -29,6 +32,7 @@ instance Show SfToken where
                    | otherwise = "$ "
   show (BuiltIn x) = x:" "
   show (Character x) = "\'" ++ [x] ++ "\' "
+  show (Argument x) = "%%x"++(show x)++"%%"
 
 data SfStack = SfStack [SfToken]
                  deriving (Eq)
@@ -38,6 +42,10 @@ instance Show SfStack where
 
 instance Semigroup SfStack where
   (<>) (SfStack xs) (SfStack ys) = SfStack $ xs++ys
+
+instance Monoid SfStack where
+  mempty = SfStack []
+  mappend (SfStack xs) (SfStack ys) = SfStack $ xs++ys
 
 push :: SfToken -> SfStack -> SfStack
 push a (SfStack xs) = SfStack $ a:xs
@@ -53,10 +61,6 @@ popped (SfStack xs) = SfStack $ tail xs
 isEmpty :: SfStack -> Bool
 isEmpty (SfStack []) = True
 isEmpty _ = False
-
-instance Monoid SfStack where
-  mempty = SfStack []
-  mappend (SfStack xs) (SfStack ys) = SfStack $ xs++ys
 
 data SfTail = SfTail SfStack SfStack -- condition and return stack
 
@@ -78,6 +82,10 @@ data SfSource = Fun (SfToken, SfFun) -- name and fun
 
 -- functions for parsing
 
+lookAndExchange :: [(SfToken, SfToken)] -> SfToken -> SfToken
+lookAndExchange table (Stack (SfStack x)) = Stack $ SfStack $ map (lookAndExchange table) x
+lookAndExchange table x = fromMaybe x $ lookup x table
+
 spaces :: Parser ()
 spaces = skipMany1 space
 
@@ -86,7 +94,8 @@ comment = do char '#'
              return ()
 
 specialCharacter :: Parser Char
-specialCharacter = (oneOf "!>@_{[]}´`'\"\\~&|ł€ŧ←↓→øþſæđŋħĸł»«¢„“”µ·…") <?> "special character"
+specialCharacter = (oneOf "!>@_{[]}´`'\"\\~&|ł€ŧ←↓→øþſæđŋħĸł»«¢„“”µ·…")
+                   <?> "special character"
 
 reservedCharacter :: Parser Char
 reservedCharacter = (oneOf "+-*/<=^v°$§:;?.,") <?> "reserved Character"
@@ -103,7 +112,8 @@ reservedButLonger = do a <- reservedCharacter
 
 identifierParser :: Parser SfToken
 identifierParser = do first <- (letter <|> reservedButLonger <|> specialCharacter)
-                      rest <- many (letter <|> digit <|> specialCharacter <|> reservedCharacter)
+                      rest <- many (letter <|> digit <|> specialCharacter
+                                    <|> reservedCharacter)
                       spaces <|> eof <|> comment
                       return $ Identifier (first:rest)
 
@@ -183,7 +193,15 @@ complexTailParser = do a <- many1 $ try branchParser
 declParser :: Parser SfSource
 declParser = do as <- headParser
                 b <- try simpleTailParser <|> try complexTailParser
-                return $ Fun $ ((last as), SfFun (init as) b)
+                return $ Fun $ ((last as),
+                                SfFun (numberList $ init as)
+                                (exchangeInTail (numberAssList $ init as) b))
+   where numberList = (map (Argument . fst) . zip [1,2..])
+         numberAssList = (map (\x -> (snd x, Argument $ fst x)) . zip [1,2..])
+         exchangeInTail nAL b =
+           [SfTail (SfStack (map (lookAndExchange $ nAL) cond))
+                   (SfStack (map (lookAndExchange $ nAL) body))
+           | (SfTail (SfStack cond) (SfStack body)) <- b]  
 
 sourceParser :: Parser SfSource
 sourceParser = do a <- try declParser <|> try mainStackParser
