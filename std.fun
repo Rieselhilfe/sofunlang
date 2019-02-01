@@ -1,3 +1,14 @@
+#aliases
+in : ,
+out : .
+push : ^
+pop : v
+popped : ;
+is_empty : °
+false : $
+true : §
+not : ~
+
 #logic
 a b <= ? a b < : § ? a b = : § ? $
 a ~ ? a : $ ? §
