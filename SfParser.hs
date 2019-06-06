@@ -8,15 +8,15 @@ parseSofun input = parse sourceParser ("") input
 type FunMap = Map.Map String SfFun
 
 data SfToken = Number Double
-                | Boolean Bool
-                | BuiltIn Char
-                | Identifier String
-                | Stack SfStack
-                | Character Char
-                deriving (Eq)
+             | Boolean Bool
+             | BuiltIn Char
+             | Identifier String
+             | Stack SfStack
+             | Character Char
+             deriving (Eq)
 
 isString :: SfStack -> Bool
-isString (SfStack []) = True
+isString (SfStack ((Character _):[])) = True
 isString (SfStack ((Character _):xs)) = isString $ SfStack xs
 isString _ = False
 
@@ -34,7 +34,7 @@ data SfStack = SfStack [SfToken]
                  deriving (Eq)
 
 instance Show SfStack where
-  show (SfStack x) = concatMap show x
+  show (SfStack x) = concatMap show (reverse x)
 
 instance Semigroup SfStack where
   (<>) (SfStack xs) (SfStack ys) = SfStack $ xs++ys
@@ -62,12 +62,15 @@ data SfTail = SfTail SfStack SfStack -- condition and return stack
 
 instance Show SfTail where
   show (SfTail (SfStack []) bs) = "? " ++ (show bs)
-  show (SfTail as           bs) = "? " ++ (show as) ++  ": " ++ (show bs) 
+  show (SfTail as           bs) = "? " ++ (show as) ++  ": " ++ (show bs)
 
 getCond (SfTail cond _) = cond
 getBody (SfTail _ body) = body
 
-data SfFun  = SfFun [SfToken] [SfTail] deriving (Show) -- args and tail  
+data SfFun  = SfFun [SfToken] [SfTail] -- args and tail
+
+instance Show SfFun where
+  show (SfFun tokens tails) = show (SfStack tokens) ++ ":" ++ concatMap show tails
 
 showFun _ (SfFun [] [])    = ""
 showFun name (SfFun [] xs) = name ++ " : " ++ (drop 2 $ concatMap show xs)
@@ -123,11 +126,11 @@ booleanParser = do a <- oneOf "§$"
 stackParser :: Parser SfToken
 stackParser = do char '('
                  spaces
-                 (SfStack a) <- allSimpleTokenParser
+                 a <- allSimpleTokenParser
                  many space
                  char ')'
                  spaces <|> eof <|> comment
-                 return $ Stack $ SfStack $ reverse a
+                 return $ Stack $ a
 
 charParser :: Parser SfToken
 charParser = do char '\''
@@ -148,7 +151,7 @@ allSimpleTokenParser = do
   a <- many (try floatParser <|> try booleanParser <|> try builtInParser <|>
              try charParser <|> try stringParser <|> try identifierParser <|>
              try stackParser)
-  return $ SfStack a
+  return $ SfStack $ reverse a
 
 mainStackParser :: Parser SfSource
 mainStackParser = do a <- allSimpleTokenParser
@@ -188,4 +191,4 @@ declParser = do as <- headParser
 sourceParser :: Parser SfSource
 sourceParser = do a <- try declParser <|> try mainStackParser
                   eof <|> comment
-                  return $ a
+                  return a
