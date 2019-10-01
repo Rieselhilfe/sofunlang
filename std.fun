@@ -43,7 +43,7 @@ i n range ? i n = : ( ) ? i 1 + n range i ^
 a b i elem_back ? a ° : -1 ? a v b = : i ? a ; b i 1 + elem_back
 elem : 0 elem_back
 a b reverse_back ? a ° : b ? a ; b a v ^ reverse_back
-reverse : ( ) reverse_back
+a reverse : a ( ) reverse_back
 a b zip ? a ° b ° | : ( ) ? a ; b ; zip ( ) b v ^ a v ^ ^
 a s e slice ? s 0 > : a ; s 1 - e 1 - slice ? e 0 <= : ( ) ? a ; s e 1 - slice a v ^
 sum : ( + ) 0 foldl
