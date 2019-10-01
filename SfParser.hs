@@ -32,7 +32,7 @@ instance Show SfToken where
     show (Boolean x)
         | x = "§ "
         | otherwise = "$ "
-    show (BuiltIn x) = '<' : x : "> "
+    show (BuiltIn x) = ' ' : '<' : x : "> "
     show (Character x) = "\'" ++ [x] ++ "\' "
 
 newtype SfStack =
