@@ -33,6 +33,7 @@ getArgNum (Identifier x) funMap
   where
     f = Map.lookup x funMap
     getFArgNum (SfFun args _) = length args
+getArgNum _ _ = 0
 
 applyBuiltIn :: Bool -> Char -> [SfToken] -> FunMap -> [SfToken]
 -- IO no arg
